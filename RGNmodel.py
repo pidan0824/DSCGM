@@ -2,13 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import copy
-import math, sys, random
+import sys
 sys.path.append("..")
 from models.feature_extract import PointNet, DGCNN
 from models.util import batch_transform, batch_quat2mat
 def mask_point(mask_idx, points):
-    # masks: [b, n] : Tensor, 包含0和1
+    # masks: [b, n] : Tensor, binary mask with 0 and 1
     # points: [b, 3, n] : Tensor
     # return: [b, 3, n2] : Tensor
     batch_size = points.shape[0]
@@ -18,7 +17,6 @@ def mask_point(mask_idx, points):
     new_points = []
 
     for new_pc in new_pcs:
-        # 删除被屏蔽的0点
         temp = new_pc[:, ...] == 0
         temp = temp.cpu()
         idx = np.argwhere(temp.all(axis=1))
@@ -57,12 +55,11 @@ def feature_interaction(src_embedding, tar_embedding):
     src_embedding = src_embedding.permute(0, 2, 1)
     tar_embedding = tar_embedding.permute(0, 2, 1)
 
-    simi_src = nn.Softmax(dim=2)(simi1)  # 转化为概率
-    glob_tar = torch.matmul(simi_src, tar_embedding)  # 加权平均tar的全局特征
+    simi_src = nn.Softmax(dim=2)(simi1)
+    glob_tar = torch.matmul(simi_src, tar_embedding)
     glob_src = torch.max(src_embedding, dim=1, keepdim=True)[0]
     glob_src = glob_src.repeat(1, num_points1, 1)
-    # print(glob_src.shape, glob_tar.shape,src_embedding.shape)
-    inter_src_feature = torch.cat((src_embedding, glob_tar, glob_src, glob_tar-glob_src), dim=2)  # 交互特征
+    inter_src_feature = torch.cat((src_embedding, glob_tar, glob_src, glob_tar-glob_src), dim=2)
     inter_src_feature = inter_src_feature.permute(0, 2, 1)
 
     return inter_src_feature
@@ -77,7 +74,7 @@ def cos_simi(src_embedding, tgt_embedding):
     # tar_norm = tgt_embedding / (tgt_embedding.norm(dim=1).reshape(batch_size, 1, num_points2))
     src_norm = F.normalize(src_embedding, p=2, dim=1)
     tar_norm = F.normalize(tgt_embedding, p=2, dim=1)
-    simi = torch.matmul(src_norm.transpose(2, 1).contiguous(), tar_norm)  # (batch, num_points1, num_points2)
+    simi = torch.matmul(src_norm.transpose(2, 1).contiguous(), tar_norm)
     return simi
 
 
@@ -137,8 +134,8 @@ class RegNet(nn.Module):
             nn.Conv1d(self.emb_dims1 * 2, self.emb_dims, 1), nn.BatchNorm1d(self.emb_dims),
             nn.LeakyReLU(negative_slope=0.01),
         )
-        self.my_iter = torch.ones(1)
-        self.reflect = nn.Parameter(torch.eye(3), requires_grad=False)
+        self.my_iter = torch.ones(1)  # NOTE: only incremented, never read
+        self.reflect = nn.Parameter(torch.eye(3), requires_grad=False)  # NOTE: unused in current code
         self.reflect[2, 2] = -1
 
     def generate_keypoints(self, src, tgt, src_embedding, tgt_embedding):
@@ -149,13 +146,13 @@ class RegNet(nn.Module):
         num_points2 = tgt.shape[1]
         simi1 = cos_simi(src_embedding, tgt_embedding)  # (batch, num_points1, num_points2)
         simi1 = torch.max(simi1, dim=2)[0]  # (batch, num_points1)
-        values, indices = torch.topk(simi1, k=int(num_points1 * 0.9), dim=1, sorted=False)
+        _, indices = torch.topk(simi1, k=int(num_points1 * 0.9), dim=1, sorted=False)
         src_keypoints = gather_points(src, indices)
         src_embedding_key = gather_points(src_embedding.permute(0, 2, 1), indices)
 
         simi2 = cos_simi(tgt_embedding, src_embedding)  # (batch, num_points2, num_points1)
-        simi2 = torch.max(simi2, dim=2)[0]  # (batch, num_points1)
-        values, indices = torch.topk(simi2, k=int(num_points2 * 0.9), dim=1, sorted=False)
+        simi2 = torch.max(simi2, dim=2)[0]  # (batch, num_points2)
+        _, indices = torch.topk(simi2, k=int(num_points2 * 0.9), dim=1, sorted=False)
         tgt_keypoints = gather_points(tgt, indices)
         tgt_embedding_key = gather_points(tgt_embedding.permute(0, 2, 1), indices)
 
@@ -167,11 +164,11 @@ class RegNet(nn.Module):
         simi1 = cos_simi(src_embedding, tar_embedding)  # (num_points1, num_points2)
         simi2 = cos_simi(tar_embedding, src_embedding)
 
-        simi_src = nn.Softmax(dim=2)(simi1)  # 转化为概率
-        src_corr = torch.matmul(simi_src, tgt)  # 加权平均tar的全局特征作为对应点(n1, 3)
+        simi_src = nn.Softmax(dim=2)(simi1)
+        src_corr = torch.matmul(simi_src, tgt)
 
-        simi_tar = nn.Softmax(dim=2)(simi2)  # 转化为概率
-        tgt_corr = torch.matmul(simi_tar, src)  # 加权平均src的全局特征作为对应点(n2, 3)
+        simi_tar = nn.Softmax(dim=2)(simi2)
+        tgt_corr = torch.matmul(simi_tar, src)
 
         return src_corr.permute(0, 2, 1), tgt_corr.permute(0, 2, 1)
 
@@ -193,7 +190,7 @@ class RegNet(nn.Module):
             r = torch.matmul(torch.matmul(v, diag), u.transpose(1, 0)).contiguous()
             R.append(r)
 
-        R = torch.stack(R, dim=0).cuda()
+        R = torch.stack(R, dim=0).to(src.device)
         t = torch.matmul(-R, src.mean(dim=2, keepdim=True)) + src_corr.mean(dim=2, keepdim=True)
         if self.training:
             self.my_iter += 1
@@ -202,17 +199,15 @@ class RegNet(nn.Module):
     def forward(self, src, tgt):
         src_embedding = self.emb_nn1(src)
         tgt_embedding = self.emb_nn1(tgt)
-        # 特征融合
+        # Feature fusion
         inter_src_feature = feature_interaction(src_embedding, tgt_embedding)
         inter_tar_feature = feature_interaction(tgt_embedding, src_embedding)
-        # 进一步提取特征
+        # Further feature extraction
         src_embedding = self.emb_nn2_src(inter_src_feature)
         tgt_embedding = self.emb_nn2_tgt(inter_tar_feature)
         src, tgt, src_embedding, tgt_embedding = self.generate_keypoints(src.permute(0, 2, 1), tgt.permute(0, 2, 1), src_embedding, tgt_embedding)
-        src_embedding = torch.where(torch.isnan(src_embedding), torch.full_like(src_embedding, random.random()),
-                                    src_embedding)
-        tgt_embedding = torch.where(torch.isnan(tgt_embedding), torch.full_like(tgt_embedding, random.random()),
-                                    tgt_embedding)
+        src_embedding = torch.nan_to_num(src_embedding, nan=0.0)
+        tgt_embedding = torch.nan_to_num(tgt_embedding, nan=0.0)
         src_corr, tgt_corr = self.generate_corr(src.permute(0, 2, 1), tgt.permute(0, 2, 1), src_embedding, tgt_embedding)
         R1, t1 = self.SVD(src, src_corr)
 

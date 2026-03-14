@@ -2,18 +2,10 @@
 # -*- coding: utf-8 -*-
 
 
-import os
-import sys
-import glob
-import h5py
-import copy
-import math
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
-from utils.dcputil import quat2mat
 
 
 _raw_features_sizes = {'xyz': 3, 'lxyz': 3, 'gxyz': 3, 'ppf': 4, 'pcf': 6}
@@ -38,18 +30,13 @@ def knn(x, k):
 
 
 def angle(v1: torch.Tensor, v2: torch.Tensor):
-    """Compute angle between 2 vectors
-
-    For robustness, we use the same formulation as in PPFNet, i.e.
-        angle(v1, v2) = atan2(cross(v1, v2), dot(v1, v2)).
-    This handles the case where one of the vectors is 0.0, since torch.atan2(0.0, 0.0)=0.0
+    """Compute angle between 2 vectors using atan2(cross, dot) for robustness.
 
     Args:
-        v1: (B, *, 3)
-        v2: (B, *, 3)
+        v1, v2: (B, *, 3).
 
     Returns:
-
+        Angle in radians, same shape as input without last dim.
     """
 
     cross_prod = torch.stack([v1[..., 1] * v2[..., 2] - v1[..., 2] * v2[..., 1],
@@ -64,10 +51,8 @@ def angle(v1: torch.Tensor, v2: torch.Tensor):
 def get_graph_feature(data, feature_name, k=20):
     xyz = data[:, :3, :]
 
-    # x = x.squeeze()
     idx = knn(xyz, k=k)  # (batch_size, num_points, k)
     batch_size, num_points, _ = idx.size()
-    # device = torch.device('cuda')
 
     idx_base = torch.arange(0, batch_size).to(xyz.device).view(-1, 1, 1) * num_points
     feature = torch.tensor([]).to(xyz.device)
@@ -135,7 +120,6 @@ class DGCNN(nn.Module):
     def __init__(self, features, neighboursnum, emb_dims=512):
         super(DGCNN, self).__init__()
 
-        # 确定输入的点云信息
         self.features = features
         self.neighboursnum = neighboursnum
         raw_dim = sum([_raw_features_sizes[f] for f in self.features])  # number of channels after concat
@@ -174,52 +158,7 @@ class DGCNN(nn.Module):
         x_node = x.squeeze(-1)
 
         x_edge = F.relu(self.bn5(self.conv5(x))).view(batch_size, -1, num_points)
-        # if torch.sum(torch.isnan(x_edge)):
-        #     print('discover nan value')
         return x_node, x_edge
-
-
-class Classify1(nn.Module):
-    def __init__(self, emb_dims=20):
-        super(Classify, self).__init__()
-        self.conv1 = nn.Conv1d(emb_dims, 256, kernel_size=1, bias=False)
-        self.conv2 = nn.Conv1d(256, 128, kernel_size=1, bias=False)
-        self.conv3 = nn.Conv1d(128, 1, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm1d(256)
-        self.bn2 = nn.BatchNorm1d(128)
-
-    def forward(self, x, y):
-        x = x.permute(0, 2, 1).contiguous()
-        y = y.permute(0, 2, 1).contiguous()
-        batch_size, _, num_points = x.size()
-        x = get_graph_feature_cross(x, y)   #(B, K, N)
-        x = F.relu(self.bn1(self.conv1(x)))
-
-        x = F.relu(self.bn2(self.conv2(x)))
-
-        x_inlier = torch.sigmoid(self.conv3(x)).permute(0,2,1).contiguous()
-
-        # x_edge = F.relu(self.bn5(self.conv5(x))).view(batch_size, -1, num_points)
-        if torch.sum(torch.isnan(x_inlier)):
-            print('discover nan value')
-        return x_inlier
-
-
-def knn_cross(x, y, k):
-    inner = -2 * torch.matmul(x.transpose(2, 1).contiguous(), y)
-    xx = torch.sum(x ** 2, dim=1, keepdim=True)
-    yy = torch.sum(y ** 2, dim=1, keepdim=True)
-    pairwise_distance = -xx - inner - yy.transpose(2, 1).contiguous()
-
-    dist = pairwise_distance.topk(k=k, dim=-1)[0]  # (batch_size, num_points, k)
-    return dist
-
-
-def get_graph_feature_cross(x, y, k=20):
-    # x = x.squeeze()
-    dist = knn_cross(x, y, k=k)  # (batch_size, num_points, k)
-    dist = dist.permute(0, 2, 1).contiguous()
-    return dist
 
 
 class Classify2(nn.Module):
@@ -236,10 +175,7 @@ class Classify2(nn.Module):
         self.bn2 = nn.BatchNorm1d(128)
 
     def forward(self, x, y):
-        # x = x.permute(0,2,1).contiguous()
         batch_size, _, num_points = x.size()
-        # x = get_graph_feature(x)
-        # y = y.permute(0,2,1).contiguous()
         y = F.relu(self.bn00(self.conv00(y)))
         y = F.relu(self.bn01(self.conv01(y)))
         y = torch.max(y, dim=2, keepdim=True)[0].repeat(1, 1, num_points)
@@ -250,10 +186,6 @@ class Classify2(nn.Module):
         x = F.relu(self.bn2(self.conv2(x)))
 
         x_inlier = torch.sigmoid(self.conv3(x)).permute(0,2,1).contiguous()
-
-        # x_edge = F.relu(self.bn5(self.conv5(x))).view(batch_size, -1, num_points)
-        if torch.sum(torch.isnan(x_inlier)):
-            print('discover nan value')
         return x_inlier
 
 
@@ -269,16 +201,11 @@ class Classify(nn.Module):
     def forward(self, x):
         x = x.permute(0,2,1).contiguous()
         batch_size, _, num_points = x.size()
-        # x = get_graph_feature(x)
         x = F.relu(self.bn1(self.conv1(x)))
 
         x = F.relu(self.bn2(self.conv2(x)))
 
         x_inlier = torch.sigmoid(self.conv3(x)).permute(0,2,1).contiguous()
-
-        # x_edge = F.relu(self.bn5(self.conv5(x))).view(batch_size, -1, num_points)
-        if torch.sum(torch.isnan(x_inlier)):
-            print('discover nan value')
         return x_inlier
 
 
@@ -293,13 +220,7 @@ class s_weight(nn.Module):
         self.pooling = nn.AdaptiveMaxPool1d(1)
         self.postpool = nn.Sequential(
             nn.Linear(1024, 512),
-            # nn.GroupNorm(16, 512),
-            # nn.ReLU(),
-
             nn.Linear(512, 256),
-            # nn.GroupNorm(16, 256),
-            # nn.ReLU(),
-
             nn.Linear(256, 1),
         )
 
@@ -312,7 +233,6 @@ class s_weight(nn.Module):
         pooled = torch.flatten(self.pooling(prepool_feat), start_dim=-2)
         raw_weights = self.postpool(pooled)
 
-        # beta = torch.exp(10*raw_weights[:, 0])
         beta = F.softplus(raw_weights[:, 0])
 
         return beta

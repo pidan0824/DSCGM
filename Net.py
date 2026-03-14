@@ -17,6 +17,7 @@ from models.SCNETmodel import GraphSCNet,create_model
 from models.RGNmodel import RegNet
 import numpy as np
 from utils.build_graphs import build_graphs
+from utils.hungarian import hungarian
 
 
 def sinkhorn_rpm(log_alpha, n_iters: int = 5, slack: bool = True, eps: float = -1) -> torch.Tensor:
@@ -86,11 +87,10 @@ def sinkhorn_rpm(log_alpha, n_iters: int = 5, slack: bool = True, eps: float = -
 class Net(nn.Module):
     def __init__(self,cfg1):
         super(Net, self).__init__()
-        # Ovrlap
+        # Overlap
         self.overlap= OverlapNet(all_points=1024, src_subsampled_points=717,tgt_subsampled_points=717)
         self.GraphSCNet=GraphSCNet(cfg1)
         self.rgn=RegNet()
-        # ==========================================================================================================
         self.pointfeaturer = DGCNN(cfg.PGM.FEATURES, cfg.PGM.NEIGHBORSNUM, cfg.PGM.FEATURE_EDGE_CHANNEL)
         self.gnn_layer = cfg.PGM.GNN_LAYER
         for i in range(self.gnn_layer):
@@ -107,8 +107,6 @@ class Net(nn.Module):
             if i == self.gnn_layer - 2:  # only second last layer will have cross-graph module
                 self.add_module('cross_graph_{}'.format(i), nn.Linear(cfg.PGM.GNN_FEAT * 2, cfg.PGM.GNN_FEAT))
 
-
-    # @profile
     def forward(self, P1_gt_reshaped3, P2_gt_reshaped3,P1_gt_reshaped6,P2_gt_reshaped6,Inlier_src_gt, Inlier_ref_gt,perm_mat):
         mask_src, mask_tgt, mask_src_idx, mask_tgt_idx = self.overlap(P1_gt_reshaped3, P2_gt_reshaped3)
         P1_gt =mask_point(mask_src_idx, P1_gt_reshaped6)
@@ -126,13 +124,9 @@ class Net(nn.Module):
         n2_gt = perm_mat1.shape[2]
         Inlier_src_gt=mask_point1(mask_src_idx,Inlier_src_gt)
 
-        # Inlier_src_gt = Inlier_src_gt.permute(0, 2, 1)
         Inlier_src_gt_edge=Inlier_src_gt
         Inlier_src_gt=Inlier_src_gt.cpu().numpy()
-        # print(tensor1.shape,tensor2.shape)
         Inlier_ref_gt = mask_point1(mask_tgt_idx, Inlier_ref_gt)
-        # tensor11 = tensor11.permute(0, 2, 1)
-        # # print(tensor1.shape,tensor2.shape)
         Inlier_ref_gt_edge=Inlier_ref_gt
         Inlier_ref_gt = Inlier_ref_gt.cpu().numpy()
         P1_np = P1_gt.cpu().numpy()
@@ -145,7 +139,6 @@ class Net(nn.Module):
             e2_gt = e1_gt
         else:
             A2_gt, e2_gt = build_graphs(P2_np, Inlier_ref_gt, n2_gt,stg=cfg.PAIR.REF_GRAPH_CONSTRUCT)
-        # ==========================================
 
         A_src = A1_gt
         A_tgt = A2_gt
@@ -155,8 +148,8 @@ class Net(nn.Module):
         P1_gttrue = P1_gt.transpose(1, 2)
         P2_gttrue = P2_gt.transpose(1, 2)
 
-        src_points_edge = P1_gttrue[:,:, :3]  # 直接从 P1_gt 获取前三个通道的张量
-        ref_points_edge = P2_gttrue[:,:, :3]  # 直接从 P2_gt 获取前三个通道的张量
+        src_points_edge = P1_gttrue[:,:, :3]  
+        ref_points_edge = P2_gttrue[:,:, :3]  
 
 
 
@@ -171,14 +164,6 @@ class Net(nn.Module):
         ref_points_edge_in = mask_point0(Inlier_ref_gt_edge, ref_points_edge_in)
         ref_points_edge_in = ref_points_edge_in.permute(0, 2, 1)
 
-        perm_mat_edge=perm_mat1
-        perm_mat_edge=mask_point0(Inlier_ref_gt_edge, perm_mat_edge)
-        perm_mat_edge=perm_mat_edge.permute(0, 2, 1)
-        perm_mat_edge=mask_point0(Inlier_src_gt_edge, perm_mat_edge)
-        perm_mat_edge=perm_mat_edge.permute(0, 2, 1)
-        # =============================================================================================================
-
-
 
 
         points_np = src_points_edge.cpu().numpy().astype(np.float32)
@@ -191,7 +176,7 @@ class Net(nn.Module):
         min_sampled_points = min(len(indices) for indices in sampled_indices_list)
         truncated_sampled_indices_list = [indices[:min_sampled_points] for indices in sampled_indices_list]
         truncated_sampled_indices_np = np.array(truncated_sampled_indices_list, dtype=int)
-        src_nodes = points_np[np.arange(B)[:, None], truncated_sampled_indices_np, :]  # print(node_indices.shape,node_indices)
+        src_nodes = points_np[np.arange(B)[:, None], truncated_sampled_indices_np, :]
         P_src = P1_gttrue
         P_tgt = P2_gttrue
 
@@ -237,25 +222,16 @@ class Net(nn.Module):
             srcinlier_s = None
             refinlier_s = None
 
-        # ============================================================================================================
-        from utils.hungarian import hungarian
-
-        lap_solver = hungarian
-
         if cfg.DATASET.NOISE_TYPE != 'clean':
             if cfg.PGM.USEINLIERRATE:
                 s = srcinlier_s * s * refinlier_s.transpose(2, 1).contiguous()
         # hard_correspondence
-        s_perm_mat = lap_solver(s, n1_gt, n2_gt, srcinlier_s, refinlier_s)
+        s_perm_mat = hungarian(s, n1_gt, n2_gt, srcinlier_s, refinlier_s)
         filtered_node_num_nodes = src_nodes.shape[1]
 
 
-        src_nodes_tensor = torch.from_numpy(src_nodes)
-        truncated_sampled_indices_tensor=torch.from_numpy(truncated_sampled_indices_np)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        src_nodes_tensor = src_nodes_tensor.to(device)
-        truncated_sampled_indices_tensor=truncated_sampled_indices_tensor.to(device)
+        src_nodes_tensor = torch.from_numpy(src_nodes).to(P1_gt_reshaped3.device)
+        truncated_sampled_indices_tensor = torch.from_numpy(truncated_sampled_indices_np).to(P1_gt_reshaped3.device)
 
 
         perm_mat_edge = mask_point0(Inlier_ref_gt_edge, s_perm_mat)
@@ -284,6 +260,5 @@ class Net(nn.Module):
 
         R1, t1,src1,src_corr1=self.rgn(src_edges,tgt_edges)
         R2, t2,src2,src_corr2=self.rgn(src_knn_edges,tgt_knn_edges)
-        # ===========================================================
 
         return s, srcinlier_s, refinlier_s,s_perm_mat,src1,src_corr1,src2,src_corr2,R1,R2,perm_mat1,mask_src, mask_tgt,src_points_edge,ref_points_edge,n1_gt,n2_gt,mask_src_idx, mask_tgt_idx,P_src,P_tgt,A_src,A_tgt
