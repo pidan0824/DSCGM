@@ -2,8 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import cuda, FloatTensor, LongTensor
-import copy, math
 
 
 # ----- DGCNN -----
@@ -33,7 +31,7 @@ def get_graph_feature(x, k=20):
     x = x.view(batch_size, num_points, 1, num_dims).repeat(1, 1, k, 1)
 
     feature = torch.cat((feature, x), dim=3).permute(0, 3, 1, 2)
-    # [batchsize, 输入特征dim*2, num_points, k]
+    # [batchsize, input_feature_dim*2, num_points, k]
     return feature
 
 
@@ -109,8 +107,7 @@ class STNkd(nn.Module):
         x = self.fc3(x)
 
         iden = torch.from_numpy(np.eye(self.k).flatten().astype(np.float32)).view(1,self.k*self.k).repeat(batchsize,1)
-        if x.is_cuda:
-            iden = iden.cuda()
+        iden = iden.to(x.device)
         x = x + iden
         x = x.view(-1, self.k, self.k)
         return x

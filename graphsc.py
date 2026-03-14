@@ -1,6 +1,5 @@
 from typing import Optional, Union
 
-import ipdb
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -101,17 +100,11 @@ class GraphSCModule(nn.Module):
         sc_weights = spatial_consistency(local_src_corr_points, local_tgt_corr_points, self.sigma_d)  # (M, k, k)
 
         # 3. prepare for aggregation
+        device = src_corr_points.device
         flat_local_corr_indices = local_corr_indices.view(-1)  # (Mxk)
         flat_local_corr_weights = local_corr_weights.view(-1)  # (Mxk)
-        corr_sum_weights = torch.zeros(size=(num_correspondences,)).cuda()  # (C,)
+        corr_sum_weights = torch.zeros(size=(num_correspondences,), device=device)  # (C,)
 
-
-        if torch.cuda.is_available():
-            device = torch.device('cuda:0')
-        else:
-            device = torch.device('cpu')
-
-        corr_sum_weights = corr_sum_weights.to(device)
         corr_sum_weights.scatter_add_(dim=0, index=flat_local_corr_indices, src=flat_local_corr_weights)  # (C,)
         flat_local_corr_sum_weights = corr_sum_weights[flat_local_corr_indices]  # (Mxk)
         flat_local_corr_weights = flat_local_corr_weights / (flat_local_corr_sum_weights + self.eps)  # (Mxk)
@@ -138,11 +131,7 @@ class GraphSCModule(nn.Module):
             # 4.3 aggregate
             flat_local_corr_feats = local_corr_feats.view(-1, self.hidden_dim)  # (Mxk, d)
             flat_local_corr_feats = flat_local_corr_feats * flat_local_corr_weights  # (Mxk, d)
-            corr_feats = torch.zeros(size=(num_correspondences, self.hidden_dim))  # (C, d)
-            device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-            corr_feats = corr_feats.to(device)
-            flat_local_corr_indices = flat_local_corr_indices.to(device)
-            flat_local_corr_feats = flat_local_corr_feats.to(device)
+            corr_feats = torch.zeros(size=(num_correspondences, self.hidden_dim), device=device)  # (C, d)
             corr_feats.scatter_add_(dim=0, index=flat_local_corr_indices, src=flat_local_corr_feats)  # (C, d)
 
         # 5. output projection

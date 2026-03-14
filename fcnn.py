@@ -1,13 +1,10 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from models.deformation_graph import compute_skinning_weights
 from torch import Tensor
 
 from models.knn import knn
-from models.pairwise_distance import pairwise_distance
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 from vision3d.layers import ConvBlock, NonRigidICP
 from vision3d.ops import (
@@ -21,17 +18,8 @@ from models.graphsc import GraphSCModule
 from typing import Any, Dict, Tuple
 
 
-# import os
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # does not affect results
-
 def create_encoder(cfg: Dict[str, Any]) -> Any:
-    """
-    创建编码器。
-    参数:
-        cfg (Dict[str, Any]): 包含编码器配置信息的字典。
-    返回:
-        Any: 创建的编码器实例。
-    """
+    """Create encoder instance from config."""
     return GraphSCModule(
         input_dim=cfg["model"]["transformer"]["input_dim"],
         output_dim=cfg["model"]["transformer"]["output_dim"],
@@ -47,15 +35,7 @@ def create_encoder(cfg: Dict[str, Any]) -> Any:
     )
 
 def create_classifier(cfg: Dict[str, Any]) -> Any:
-    """
-    创建分类器。
-
-    参数:
-        cfg (Dict[str, Any]): 包含分类器配置信息的字典。
-
-    返回:
-        Any: 创建的分类器实例。
-    """
+    """Create classifier instance from config."""
     return nn.Sequential(
         ConvBlock(
             in_channels=cfg["model"]["classifier"]["input_dim"],
@@ -131,13 +111,12 @@ def filter_correspondences(data_dict, num_anchors, node_coverage, max_local_corr
     # Build deformation graph (placeholder implementation)
     def build_euclidean_deformation_graph(src_points, nodes, num_anchors, node_coverage):
         anchor_distances, anchor_indices = knn(src_points, nodes, num_anchors, return_distance=True)  # (N, K)
-        # print(anchor_distances.shape)
         anchor_weights = compute_skinning_weights(anchor_distances, node_coverage)  # (N, K)
         anchor_weights = anchor_weights / anchor_weights.sum(dim=1, keepdim=True)  # (N, K)
         return anchor_indices, anchor_weights
     corr_anchor_indices, corr_anchor_weights = build_euclidean_deformation_graph(src_corr_points, src_nodes,num_anchors, node_coverage)
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = src_points.device
     anchor_masks = torch.ne(corr_anchor_indices, -1)  # (C, Ka)
     anchor_corr_indices, anchor_col_indices = torch.nonzero(anchor_masks, as_tuple=True)
     anchor_node_indices = corr_anchor_indices[anchor_corr_indices, anchor_col_indices]

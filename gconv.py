@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 import torch.nn.functional as F
 
 class Gconv(nn.Module):
@@ -20,7 +19,7 @@ class Gconv(nn.Module):
 
         ax = self.a_fc(x)
         ux = self.u_fc(x)
-        x = torch.bmm(A, F.relu(ax)) + F.relu(ux) # has size (bs, N, num_outputs)
+        x = torch.bmm(A, F.relu(ax)) + F.relu(ux) 
 
         return x
 
@@ -35,5 +34,4 @@ class Siamese_Gconv(nn.Module):
     def forward(self, g1, g2):
         emb1 = self.gconv(*g1)
         emb2 = self.gconv(*g2)
-        # embx are tensors of size (bs, N, num_features)
         return emb1, emb2

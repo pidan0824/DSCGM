@@ -34,35 +34,25 @@ def build_euclidean_deformation_graph(
     return_adjacent_matrix: bool = False,
     eps: float = 1e-6,
 ) -> Tuple[Tensor, ...]:
-    """Build deformation graph with euclidean distance.
+    """Build deformation graph using Embedded Deformation method with euclidean distance.
 
-    We use the method proposed in Embedded Deformation to construct the deformation graph:
-        1. Each point is assigned to its k-nearest nodes.
-        2. If two nodes cover the same point, there is an edge between them.
-        3. We compute the skinning weights following DynamicFusion.
+    Each point is assigned to k-nearest nodes; nodes sharing a point are connected by an edge.
+    Skinning weights follow DynamicFusion: w = exp(-d^2 / (2 * r^2)).
 
     Args:
-        points (Tensor): the points in the shape of (N, 3).
-        nodes (Tensor): the nodes in the shape of (M, 3).
-        num_anchors (int): the number of anchors for each point.
-        node_coverage (float): the node coverage to compute skinning weights.
-        return_point_anchor (bool): if True, return the anchors for the points. Default: True.
-        return_node_graph (bool): if True, return the edges between the nodes. Default: True.
-        return_distance (bool): if True, return the distance. Default: False.
-        return_adjacent_matrix (bool): if True, return the adjacent matrix instead of edge list. Default: False.
-            Only take effect when 'return_node_graph' is True.
-        eps (float): A safe number for division. Default: 1e-6.
+        points: (N, 3), input points.
+        nodes: (M, 3), graph nodes.
+        num_anchors: number of anchor nodes per point.
+        node_coverage: coverage radius for skinning weights.
+        return_point_anchor: if True, return anchor indices and weights for points.
+        return_node_graph: if True, return node graph edges/adjacency.
+        return_distance: if True, include distances in output.
+        return_adjacent_matrix: if True, return adjacency matrix instead of edge list.
+        eps: safe division epsilon.
 
     Returns:
-        A LongTensor of the anchor node indices for the points in the shape of (N, K).
-        A Tensor of the anchor node weights for the points in the shape of (N, K).
-        A Tensor of the anchor node distances for the points in the shape of (N, K).
-        A LongTensor of the endpoint indices of the edges in the shape of (E, 2).
-        A Tensor of the weights of the edges in the shape of (E).
-        A Tensor of the distances of the edges in the shape of (E).
-        A BoolTensor of the adjacent matrix between nodes in the shape of (M, M).
-        A Tensor of the skinning weight matrix between nodes of (M, M).
-        A Tensor of the distance matrix between nodes of (M, M).
+        Tuple of requested tensors (anchor_indices, anchor_weights, distances,
+        edge_indices/adjacent_mat, edge_weights/weight_mat, edge_distances/distance_mat).
     """
     output_list = []
 
@@ -77,8 +67,8 @@ def build_euclidean_deformation_graph(
             output_list.append(anchor_distances)
 
     if return_node_graph:
-        point_indices = torch.arange(points.shape[0]).cuda().unsqueeze(1).expand_as(anchor_indices)  # (N, K)
-        node_to_point = torch.zeros(size=(nodes.shape[0], points.shape[0])).cuda()  # (N, M)
+        point_indices = torch.arange(points.shape[0], device=points.device).unsqueeze(1).expand_as(anchor_indices)  # (N, K)
+        node_to_point = torch.zeros(size=(nodes.shape[0], points.shape[0]), device=points.device)  # (N, M)
         node_to_point[anchor_indices, point_indices] = 1.0
         adjacent_mat = torch.gt(torch.einsum("nk,mk->nm", node_to_point, node_to_point), 0)
         distance_mat = pairwise_distance(nodes, nodes, squared=False)
