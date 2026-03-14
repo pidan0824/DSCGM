@@ -14,15 +14,15 @@ def knn_point1s(
     """Heap sort based kNN search for point cloud.
 
     Args:
-        q_points (Tensor): The query points in shape of (B, N, 3) or (B, 3, N) if transposed.
-        s_points (Tensor): The support points in shape of (B, M, 3) or (B, 3, M) if transposed.
-        k (int): The number of neighbors.
-        transposed (bool=False): If True, the points are in shape of (B, 3, N).
-        return_distance (bool=False): If True, return the distances of the kNN.
+        q_points: (B, N, 3) or (B, 3, N) if transposed.
+        s_points: (B, M, 3) or (B, 3, M) if transposed.
+        k: number of neighbors.
+        transposed: if True, points shape is (B, 3, N).
+        return_distance: if True, also return distances.
 
     Returns:
-        A Tensor of the distances of the kNN in shape of (B, N, k).
-        A LongTensor of the indices of the kNN in shape of (B, N, k).
+        knn_distances: (B, N, k), only if return_distance is True.
+        knn_indices: (B, N, k).
     """
     if transposed:
         q_points = q_points.transpose(1, 2)  # (B, N, 3) -> (B, 3, N)
@@ -31,8 +31,7 @@ def knn_point1s(
     s_points = s_points.contiguous()
 
     knn_distances = q_points.new_zeros(size=(q_points.shape[0], q_points.shape[1], k))  # (B, N, k)
-    knn_indices = torch.zeros(size=(q_points.shape[0], q_points.shape[1], k), dtype=torch.long).cuda()  # (B, N, k)
-    knn_indices= knn_indices.to("cpu")
+    knn_indices = torch.zeros(size=(q_points.shape[0], q_points.shape[1], k), dtype=torch.long)  # (B, N, k)
     knn(q_points, s_points, knn_distances, knn_indices, k)
 
     if return_distance:
@@ -54,26 +53,24 @@ def knn_points(
     padding_value: float = 1e10,
     squeeze: bool = False,
 ):
-    """Compute the kNNs of the points in `q_points` from the points in `s_points`.
-
-    Use KeOps to accelerate computation.
+    """kNN search using KeOps acceleration. Supports dilation, distance limit, and self-removal.
 
     Args:
-        s_points (Tensor): coordinates of the support points, (*, C, N) or (*, N, C).
-        q_points (Tensor): coordinates of the query points, (*, C, M) or (*, M, C).
-        k (int): number of nearest neighbors to compute.
-        dilation (int): dilation for dilated knn.
-        distance_limit (float=None): if further than this radius, the neighbors are ignored according to `padding_mode`.
-        return_distance (bool=False): whether return distances.
-        remove_nearest (bool=True) whether remove the nearest neighbor (itself).
-        transposed (bool=False): if True, the points shape is (*, C, N).
-        padding_mode (str='nearest'): the padding mode for neighbors further than distance radius. ('nearest', 'empty').
-        padding_value (float=1e10): the value for padding.
-        squeeze (bool=False): if True, the distance and the indices are squeezed if k=1.
+        q_points: (*, C, N) or (*, N, C), query points.
+        s_points: (*, C, M) or (*, M, C), support points.
+        k: number of nearest neighbors.
+        dilation: dilation factor for dilated knn.
+        distance_limit: ignore neighbors beyond this radius.
+        return_distance: if True, also return distances.
+        remove_nearest: if True, remove the nearest neighbor (itself).
+        transposed: if True, points shape is (*, C, N).
+        padding_mode: 'nearest' or 'empty' for out-of-range neighbors.
+        padding_value: fill value for 'empty' padding mode.
+        squeeze: if True, squeeze output when k=1.
 
     Returns:
-        knn_distances (Tensor): The distances of the kNNs, (*, M, k).
-        knn_indices (LongTensor): The indices of the kNNs, (*, M, k).
+        knn_distances: (*, M, k), only if return_distance is True.
+        knn_indices: (*, M, k).
     """
     if transposed:
         q_points = q_points.transpose(-1, -2)  # (*, C, N) -> (*, N, C)

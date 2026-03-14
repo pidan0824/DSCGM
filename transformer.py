@@ -114,7 +114,7 @@ class LayerNorm(nn.Module):
 
 
 class SublayerConnection(nn.Module):
-    def __init__(self, size, dropout=None):
+    def __init__(self, size):
         super(SublayerConnection, self).__init__()
         self.norm = LayerNorm(size)
 
@@ -127,7 +127,7 @@ class EncoderLayer(nn.Module):
         super(EncoderLayer, self).__init__()
         self.self_attn = self_attn
         self.feed_forward = feed_forward
-        self.sublayer = clones(SublayerConnection(size, dropout), 2)
+        self.sublayer = clones(SublayerConnection(size), 2)
         self.size = size
 
     def forward(self, x, mask):
@@ -144,7 +144,7 @@ class DecoderLayer(nn.Module):
         self.self_attn = self_attn
         self.src_attn = src_attn
         self.feed_forward = feed_forward
-        self.sublayer = clones(SublayerConnection(size, dropout), 3)
+        self.sublayer = clones(SublayerConnection(size), 3)
 
     def forward(self, x, memory, src_mask, tgt_mask):
         "Follow Figure 1 (right) for connections."
@@ -159,7 +159,6 @@ class MultiHeadedAttention(nn.Module):
         "Take in model size and number of heads."
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
-        # We assume d_v always equals d_k
         self.d_k = d_model // h
         self.h = h
         self.linears = clones(nn.Linear(d_model, d_model), 4)
@@ -194,12 +193,10 @@ class PositionwiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
         super(PositionwiseFeedForward, self).__init__()
         self.w_1 = nn.Linear(d_model, d_ff)
-        self.norm = nn.Sequential()  # nn.BatchNorm1d(d_ff)
         self.w_2 = nn.Linear(d_ff, d_model)
-        self.dropout = None
 
     def forward(self, x):
-        return self.w_2(self.norm(F.relu(self.w_1(x)).transpose(2, 1).contiguous()).transpose(2, 1).contiguous())
+        return self.w_2(F.relu(self.w_1(x)))
 
 
 class Identity(nn.Module):
@@ -207,12 +204,11 @@ class Identity(nn.Module):
         super(Identity, self).__init__()
 
     def forward(self, *input):
-        return input
+        return input[0]
 
 
 class Transformer(nn.Module):
     def __init__(self, emb_dims=512, n_blocks=1, dropout=0.0, ff_dims=1024, n_heads=4):
-        # emb_dims 是决定输入输出特征维度的变量，两者相等；  ff_dims是中间的特征变量
         super(Transformer, self).__init__()
         self.emb_dims = emb_dims
         self.N = n_blocks

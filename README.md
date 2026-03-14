@@ -1,2 +1,3 @@
 # DSCGM
-See the file for more details.
+
+Based on: https://github.com/fukexue/RGM

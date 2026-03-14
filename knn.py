@@ -40,26 +40,24 @@ def knn(
     padding_value: float = 1e10,
     squeeze: bool = False,
 ):
-    """Compute the kNNs of the points in `q_points` from the points in `s_points`.
-
-    Use KeOps to accelerate computation.
+    """kNN search using KeOps. Supports dilation, distance limit, and self-removal.
 
     Args:
-        s_points (Tensor): coordinates of the support points, (*, C, N) or (*, N, C).
-        q_points (Tensor): coordinates of the query points, (*, C, M) or (*, M, C).
-        k (int): number of nearest neighbors to compute.
-        dilation (int): dilation for dilated knn.
-        distance_limit (float=None): if further than this radius, the neighbors are ignored according to `padding_mode`.
-        return_distance (bool=False): whether return distances.
-        remove_nearest (bool=True) whether remove the nearest neighbor (itself).
-        transposed (bool=False): if True, the points shape is (*, C, N).
-        padding_mode (str='nearest'): the padding mode for neighbors further than distance radius. ('nearest', 'empty').
-        padding_value (float=1e10): the value for padding.
-        squeeze (bool=False): if True, the distance and the indices are squeezed if k=1.
+        q_points: (*, C, N) or (*, N, C), query points.
+        s_points: (*, C, M) or (*, M, C), support points.
+        k: number of nearest neighbors.
+        dilation: dilation factor for dilated knn.
+        distance_limit: ignore neighbors beyond this radius.
+        return_distance: if True, also return distances.
+        remove_nearest: if True, remove the nearest neighbor (itself).
+        transposed: if True, points shape is (*, C, N).
+        padding_mode: 'nearest' or 'empty' for out-of-range neighbors.
+        padding_value: fill value for 'empty' padding mode.
+        squeeze: if True, squeeze output when k=1.
 
     Returns:
-        knn_distances (Tensor): The distances of the kNNs, (*, M, k).
-        knn_indices (LongTensor): The indices of the kNNs, (*, M, k).
+        knn_distances: (*, M, k), only if return_distance is True.
+        knn_indices: (*, M, k).
     """
 
     if transposed:
@@ -115,23 +113,20 @@ def knn_pack_mode(
     return_distance: bool = False,
     inf: float = 1e10,
 ):
-    """Compute the kNN of the query points in the support points in pack mode.
-
-    Note:
-        1. This function requires the number of support points is larger than k.
+    """kNN search in pack mode. Requires num support points >= k.
 
     Args:
-        q_points (Tensor): the query points in the shape of (N, 3).
-        s_points (Tensor): the support points in the shape of (M, 3).
-        q_lengths (Tensor): the number of the query points in the batch in the shape of (B).
-        s_lengths (Tensor): the number of the support points in the batch in the shape of (B).
-        k (int): the k-nearest neighbors are computed.
-        return_distance (bool): if True, return the distance of the neighbors. Default: False.
-        inf (float): the infinity value for padding. Default: 1e10.
+        q_points: (N, 3), query points (packed).
+        s_points: (M, 3), support points (packed).
+        q_lengths: (B,), number of query points per batch.
+        s_lengths: (B,), number of support points per batch.
+        k: number of nearest neighbors.
+        return_distance: if True, also return distances.
+        inf: padding value for batch conversion.
 
     Returns:
-        A Tensor of the distances of the k-nearest neighbors in the shape of (N, k).
-        A LongTensor of the indices of the k-nearest neighbors in the shape of (N, k).
+        knn_distances: (N, k), only if return_distance is True.
+        knn_indices: (N, k).
     """
     assert torch.all(torch.ge(s_lengths, k)), f"The number of support points less than {k}."
     batch_q_points, batch_q_masks = pack_to_batch(q_points, q_lengths, fill_value=inf)
